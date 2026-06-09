@@ -2,8 +2,13 @@ name: Build ML Handbook PDF
 
 on:
   schedule:
-    - cron: '0 8 * * 1'  # каждый понедельник в 8:00 UTC
-  workflow_dispatch:       # ручной запуск через кнопку на GitHub
+    - cron: '0 8 * * 1'  # каждый понедельник в 08:00 UTC
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Пересобрать PDF даже если TOC не изменился'
+        type: boolean
+        default: false
 
 jobs:
   check-and-build:
@@ -15,7 +20,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: master
 
       - name: Install system deps (WeasyPrint/Pango)
         run: |
@@ -28,9 +33,9 @@ jobs:
       - name: Setup uv + Python deps
         run: |
           pip install uv
-          uv venv
-          source .venv/bin/activate
-          uv pip install weasyprint latex2mathml
+          uv venv .venv
+          uv pip install --python .venv/bin/python weasyprint latex2mathml
+          echo "$PWD/.venv/bin" >> $GITHUB_PATH
 
       - name: Restore page cache
         uses: actions/cache@v4
@@ -48,11 +53,14 @@ jobs:
 
       - name: Check for TOC changes
         id: check
+        env:
+          FORCE_BUILD: ${{ inputs.force_build || 'false' }}
         run: |
-          source .venv/bin/activate
           python - <<'PYEOF'
           import subprocess, hashlib, sys, os
           from pathlib import Path
+
+          force = os.environ.get('FORCE_BUILD', 'false').lower() == 'true'
 
           result = subprocess.run(
               ['curl', '-skL', '--max-time', '30',
@@ -73,9 +81,9 @@ jobs:
           hash_file = Path('cache/toc.hash')
           stored = hash_file.read_text().strip() if hash_file.exists() else ''
 
-          changed = current != stored
+          changed = force or (current != stored)
           print(f"TOC hash: {current} (stored: {stored or 'none'})")
-          print(f"Changed: {changed}")
+          print(f"Force: {force} | Changed: {changed}")
 
           import datetime
           date = datetime.date.today().isoformat()
@@ -92,7 +100,6 @@ jobs:
       - name: Build PDF
         if: steps.check.outputs.changed == 'true'
         run: |
-          source .venv/bin/activate
           python build_pdf.py
           ls -lh ml_handbook.pdf
 
@@ -119,4 +126,4 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add cache/toc.hash
           git diff --cached --quiet || git commit -m "chore: update TOC hash [${{ steps.check.outputs.hash }}]"
-          git push
+          git push origin HEAD:master
