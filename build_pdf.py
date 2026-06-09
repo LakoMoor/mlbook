@@ -854,7 +854,13 @@ def build(force: bool = False) -> None:
     print(f"\n✔ HTML: {OUTPUT_HTML} ({OUTPUT_HTML.stat().st_size // 1024} KB)")
 
     print("⏳ Генерируем PDF (может занять пару минут)...")
-    doc = weasyprint.HTML(filename=str(OUTPUT_HTML)).write_pdf()
+    try:
+        doc = weasyprint.HTML(filename=str(OUTPUT_HTML)).write_pdf()
+    except Exception as e:
+        # fontTools может падать при сабсеттинге шрифтов с битыми MATH-таблицами;
+        # hinting=False пропускает проблемный путь компиляции.
+        print(f"⚠ Ошибка генерации (retry hinting=False): {e}")
+        doc = weasyprint.HTML(filename=str(OUTPUT_HTML)).write_pdf(hinting=False)
     OUTPUT_PDF.write_bytes(doc)
     size_mb = OUTPUT_PDF.stat().st_size / 1024 / 1024
     print(f"✔ PDF:  {OUTPUT_PDF} ({size_mb:.1f} MB)")

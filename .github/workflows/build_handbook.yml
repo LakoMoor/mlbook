@@ -28,7 +28,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libpango-1.0-0 libpangocairo-1.0-0 libcairo2 \
             libgdk-pixbuf2.0-0 libffi-dev shared-mime-info \
-            fonts-freefont-ttf fonts-dejavu-core
+            fonts-dejavu-core
+          # fonts-freefont-ttf намеренно исключён: FreeFont содержит MATH-таблицу
+          # с битыми ссылками на глифы, что ломает fontTools при сабсеттинге.
 
       - name: Setup uv + Python deps
         run: |
