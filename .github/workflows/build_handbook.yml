@@ -1,0 +1,122 @@
+name: Build ML Handbook PDF
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'  # каждый понедельник в 8:00 UTC
+  workflow_dispatch:       # ручной запуск через кнопку на GitHub
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install system deps (WeasyPrint/Pango)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangocairo-1.0-0 libcairo2 \
+            libgdk-pixbuf2.0-0 libffi-dev shared-mime-info \
+            fonts-freefont-ttf fonts-dejavu-core
+
+      - name: Setup uv + Python deps
+        run: |
+          pip install uv
+          uv venv
+          source .venv/bin/activate
+          uv pip install weasyprint latex2mathml
+
+      - name: Restore page cache
+        uses: actions/cache@v4
+        with:
+          path: cache/pages
+          key: handbook-pages-${{ hashFiles('cache/toc.hash') }}
+          restore-keys: handbook-pages-
+
+      - name: Restore image cache
+        uses: actions/cache@v4
+        with:
+          path: cache/images
+          key: handbook-images-v1
+          restore-keys: handbook-images-
+
+      - name: Check for TOC changes
+        id: check
+        run: |
+          source .venv/bin/activate
+          python - <<'PYEOF'
+          import subprocess, hashlib, sys, os
+          from pathlib import Path
+
+          result = subprocess.run(
+              ['curl', '-skL', '--max-time', '30',
+               'https://education.yandex.ru/handbook/ml/'],
+              capture_output=True
+          )
+          html = result.stdout.decode('utf-8', errors='replace')
+          start = html.find('\\"content\\":[{\\"title\\":\\"1.')
+          if start == -1:
+              print("::warning::Could not find TOC in page")
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write("changed=false\n")
+              sys.exit(0)
+
+          raw = html[start:start + 20000]
+          current = hashlib.sha256(raw.encode()).hexdigest()[:24]
+
+          hash_file = Path('cache/toc.hash')
+          stored = hash_file.read_text().strip() if hash_file.exists() else ''
+
+          changed = current != stored
+          print(f"TOC hash: {current} (stored: {stored or 'none'})")
+          print(f"Changed: {changed}")
+
+          import datetime
+          date = datetime.date.today().isoformat()
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"changed={'true' if changed else 'false'}\n")
+              f.write(f"hash={current}\n")
+              f.write(f"date={date}\n")
+
+          Path('cache').mkdir(exist_ok=True)
+          hash_file.write_text(current)
+          PYEOF
+
+      - name: Build PDF
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          source .venv/bin/activate
+          python build_pdf.py
+          ls -lh ml_handbook.pdf
+
+      - name: Create GitHub Release with PDF
+        if: steps.check.outputs.changed == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "handbook-${{ steps.check.outputs.hash }}"
+          name: "ML Handbook — ${{ steps.check.outputs.date }}"
+          body: |
+            Автоматическая сборка Учебника по машинному обучению (Яндекс ШАД).
+
+            📚 **16 глав, 72 статьи**
+            🔑 TOC hash: `${{ steps.check.outputs.hash }}`
+            📅 Дата сборки: ${{ steps.check.outputs.date }}
+
+            Скачай `ml_handbook.pdf` ниже.
+          files: ml_handbook.pdf
+
+      - name: Commit updated hash
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add cache/toc.hash
+          git diff --cached --quiet || git commit -m "chore: update TOC hash [${{ steps.check.outputs.hash }}]"
+          git push

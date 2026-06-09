@@ -1,0 +1,14 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Generated files (too large for git)
+ml_handbook.pdf
+ml_handbook.html
+test_output.*
+
+# Page/image cache (optional — keep if you want to avoid re-fetching)
+cache/pages/
+cache/images/
+cache/main.html
