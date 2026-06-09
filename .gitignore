@@ -3,6 +3,9 @@
 __pycache__/
 *.pyc
 
+# macOS
+.DS_Store
+
 # Generated files (too large for git)
 ml_handbook.pdf
 ml_handbook.html
