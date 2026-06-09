@@ -36,7 +36,7 @@ jobs:
         run: |
           pip install uv
           uv venv .venv
-          uv pip install --python .venv/bin/python weasyprint latex2mathml
+          uv pip install --python .venv/bin/python weasyprint latex2mathml Pillow
           echo "$PWD/.venv/bin" >> $GITHUB_PATH
 
       - name: Restore page cache
@@ -50,7 +50,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: cache/images
-          key: handbook-images-v1
+          key: handbook-images-v2
           restore-keys: handbook-images-
 
       - name: Check for TOC changes

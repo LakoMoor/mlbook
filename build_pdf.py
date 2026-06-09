@@ -163,7 +163,34 @@ def process_code_blocks(html: str) -> str:
     return _PRE_RE.sub(_replace_code_block, html)
 
 
-# ── Image caching ─────────────────────────────────────────────────────────────
+# ── Image caching + optimization ─────────────────────────────────────────────
+
+_MAX_IMG_WIDTH = 1200
+_JPEG_QUALITY  = 82
+
+
+def _optimize(raw: bytes) -> tuple[bytes, str]:
+    """Return (compressed_bytes, 'jpg'|'png'). Falls back to original on error."""
+    try:
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(raw))
+        if img.width > _MAX_IMG_WIDTH:
+            h = int(img.height * _MAX_IMG_WIDTH / img.width)
+            img = img.resize((_MAX_IMG_WIDTH, h), Image.LANCZOS)
+        buf = io.BytesIO()
+        has_alpha = img.mode in ("RGBA", "LA") or (
+            img.mode == "P" and "transparency" in img.info
+        )
+        if has_alpha:
+            img.convert("RGBA").save(buf, "PNG", optimize=True)
+            return buf.getvalue(), "png"
+        else:
+            img.convert("RGB").save(buf, "JPEG", quality=_JPEG_QUALITY, optimize=True)
+            return buf.getvalue(), "jpg"
+    except Exception:
+        return raw, "img"
+
 
 def _replace_img_src(m: re.Match) -> str:
     src = m.group(1)
@@ -173,19 +200,23 @@ def _replace_img_src(m: re.Match) -> str:
         src = "https:" + src
     if not src.startswith("http"):
         return m.group(0)
+
     img_hash = hashlib.md5(src.encode()).hexdigest()[:16]
-    clean_path = src.split("?")[0].split("/")[-1]
-    raw_ext = clean_path.rsplit(".", 1)
-    ext = re.sub(r'[^a-zA-Z0-9]', '', raw_ext[-1])[:8] if len(raw_ext) > 1 else "img"
-    ext = ext or "img"
-    img_path = IMG_CACHE / f"{img_hash}.{ext}"
-    if not img_path.exists():
-        data = fetch(src)
-        if data:
-            img_path.write_bytes(data)
-    if img_path.exists():
-        return f'src="{img_path.resolve()}"'
-    return m.group(0)
+
+    # Re-use any already-optimized file for this URL
+    for ext in ("jpg", "png", "img"):
+        p = IMG_CACHE / f"{img_hash}.{ext}"
+        if p.exists():
+            return f'src="{p.resolve()}"'
+
+    raw = fetch(src)
+    if not raw:
+        return m.group(0)
+
+    data, ext = _optimize(raw)
+    out = IMG_CACHE / f"{img_hash}.{ext}"
+    out.write_bytes(data)
+    return f'src="{out.resolve()}"'
 
 
 def process_images(html: str) -> str:
